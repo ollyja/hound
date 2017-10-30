@@ -1,4 +1,6 @@
+ui/node_modules
 .vagrant
 .build
 .DS_Store
 *.exe
+*.swp
