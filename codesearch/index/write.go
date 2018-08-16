@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/etsy/hound/codesearch/sparse"
+	"github.com/dmsimard/hound/codesearch/sparse"
 )
 
 // Index writing.  See read.go for details of on-disk format.
