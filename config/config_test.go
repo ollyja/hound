@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/dmsimard/hound/vcs"
+	"github.com/jthebault/hound/vcs"
 )
 
 const exampleConfigFile = "config-example.json"

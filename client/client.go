@@ -3,8 +3,8 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/dmsimard/hound/config"
-	"github.com/dmsimard/hound/index"
+	"github.com/jthebault/hound/config"
+	"github.com/jthebault/hound/index"
 	"net/http"
 	"net/url"
 	"regexp"

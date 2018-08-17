@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmsimard/hound/config"
-	"github.com/dmsimard/hound/index"
-	"github.com/dmsimard/hound/searcher"
+	"github.com/jthebault/hound/config"
+	"github.com/jthebault/hound/index"
+	"github.com/jthebault/hound/searcher"
 )
 
 const (
