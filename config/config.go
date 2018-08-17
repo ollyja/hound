@@ -13,7 +13,7 @@ const (
 	defaultPushEnabled           = false
 	defaultPollEnabled           = true
 	defaultVcs                   = "git"
-	defaultBaseUrl               = "{url}/blob/release-2.9/{path}{anchor}"
+	defaultBaseUrl               = "{url}/blob/{rev}/{path}{anchor}"
 	defaultAnchor                = "#L{line}"
 )
 
