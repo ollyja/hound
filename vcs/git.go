@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const defaultRef = "release-2.9"
+const defaultRef = "master"
 
 func init() {
 	Register(newGit, "git")
