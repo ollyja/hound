@@ -1,5 +1,3 @@
-/** @jsx React.DOM */
-
 var Signal = function() {
 };
 

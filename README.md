@@ -95,13 +95,13 @@ Currently the following editors have plugins that support Hound:
 
 #### Requirements:
  * make
- * Node.js ([Installation Instructions](https://github.com/joyent/node/wiki/Installing-Node.js-via-package-manager))
- * React-tools (install w/ `npm -g install react-tools`)
+ * Node.js/npm ([Installation Instructions](https://github.com/joyent/node/wiki/Installing-Node.js-via-package-manager))
 
 Hound includes tools to make building locally easy. It is recommended that you use these tools if you are working on Hound. To get setup and build, just run the following commands:
 
 ```
 git clone https://github.com/etsy/hound.git hound/src/github.com/etsy/hound
+(cd hound/src/github.com/etsy/hound/ui && npm install)
 cd hound
 src/github.com/etsy/hound/tools/setup
 make

@@ -92,17 +92,18 @@ func renderForDev(w io.Writer, root string, c *content, cfg *config.Config, r *h
 	var buf bytes.Buffer
 	fmt.Fprintf(
 		&buf,
-		"<script src=\"js/JSXTransformer-%s.js\"></script>\n",
-		ReactVersion)
+		"<script src=\"js/babel-standalone-%s.min.js\"></script>\n",
+		BabelVersion)
 	for _, path := range c.sources {
 		fmt.Fprintf(
 			&buf,
-			"<script type=\"text/jsx\" src=\"%s\"></script>",
+			"<script type=\"text/babel\" data-presets=\"latest,react\" src=\"%s\"></script>",
 			path)
 	}
 
 	return c.tpl.Execute(w, map[string]interface{}{
 		"ReactVersion":  ReactVersion,
+		"BabelVersion":  BabelVersion,
 		"jQueryVersion": JQueryVersion,
 		"ReposAsJson":   json,
 		"Source":        html_template.HTML(buf.String()),

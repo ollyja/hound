@@ -6,6 +6,7 @@ import "io"
 const (
 	ReactVersion  = "0.12.2"
 	JQueryVersion = "2.1.3"
+	BabelVersion = "6.26.0"
 )
 
 var contents map[string]*content
