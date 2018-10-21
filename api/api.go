@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jthebault/hound/config"
-	"github.com/jthebault/hound/index"
-	"github.com/jthebault/hound/searcher"
+	"github.com/etsy/hound/config"
+	"github.com/etsy/hound/index"
+	"github.com/etsy/hound/searcher"
 )
 
 const (

@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	"github.com/jthebault/hound/index"
+	"github.com/etsy/hound/index"
 )
 
 // TODO(knorton):

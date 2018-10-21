@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/jthebault/hound/config"
+	"github.com/etsy/hound/config"
 )
 
 // An http.Handler for the dev-mode case.
@@ -64,7 +64,7 @@ func (h *devHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // for the source elements.
 func renderForDev(w io.Writer, root string, c *content, cfg *config.Config, r *http.Request) error {
 	var err error
-	// For more context, see: https://github.com/jthebault/hound/issues/239
+	// For more context, see: https://github.com/etsy/hound/issues/239
 	switch c.tplType {
 	case "html":
 		// Use html/template to parse the html template
@@ -202,7 +202,7 @@ func newPrdHandler(cfg *config.Config) (http.Handler, error) {
 			return nil, err
 		}
 
-		// For more context, see: https://github.com/jthebault/hound/issues/239
+		// For more context, see: https://github.com/etsy/hound/issues/239
 		switch cnt.tplType {
 		case "html":
 			// Use html/template to parse the html template

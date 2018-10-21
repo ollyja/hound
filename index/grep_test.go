@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jthebault/hound/codesearch/regexp"
+	"github.com/etsy/hound/codesearch/regexp"
 )
 
 var (

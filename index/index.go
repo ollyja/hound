@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jthebault/hound/codesearch/index"
-	"github.com/jthebault/hound/codesearch/regexp"
+	"github.com/etsy/hound/codesearch/index"
+	"github.com/etsy/hound/codesearch/regexp"
 )
 
 const (

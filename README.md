@@ -100,9 +100,9 @@ Currently the following editors have plugins that support Hound:
 Hound includes tools to make building locally easy. It is recommended that you use these tools if you are working on Hound. To get setup and build, just run the following commands:
 
 ```
-git clone https://github.com/etsy/hound.git hound/src/github.com/etsy/hound
-(cd hound/src/github.com/etsy/hound/ui && npm install)
+git clone https://github.com/ollyja/hound.git hound/src/github.com/etsy/hound
 cd hound
+(cd src/github.com/etsy/hound/ui && npm install)
 src/github.com/etsy/hound/tools/setup
 make
 ```
