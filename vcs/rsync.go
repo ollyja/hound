@@ -3,6 +3,9 @@ package vcs
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
+
+	"github.com/etsy/hound/config"
 )
 
 func init() {
@@ -13,6 +16,10 @@ type RsyncDriver struct{}
 
 func newRsync(b []byte) (Driver, error) {
 	return &RsyncDriver{}, nil
+}
+
+func (g *RsyncDriver) WorkingDirForRepo(dbpath string, repo *config.Repo) (string, error) {
+    return strings.TrimPrefix(repo.Url, "file://"), nil
 }
 
 func (g *RsyncDriver) HeadRev(dir string) (string, error) {
