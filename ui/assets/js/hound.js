@@ -68,7 +68,7 @@ var ParamsFromQueryString = function(qs, params) {
 var ParamsFromUrl = function(params) {
   params = params || {
     q: '',
-    i: 'nope',
+    i: 'true',
     files: '',
     repos: '*'
   };
@@ -400,7 +400,7 @@ var SearchBar = React.createClass({
     files.value = params.files;
   },
   hasAdvancedValues: function() {
-    return this.refs.files.getDOMNode().value.trim() !== '' || this.refs.icase.getDOMNode().checked || this.refs.repos.getDOMNode().value !== '';
+    return this.refs.files.getDOMNode().value.trim() !== '' || this.refs.repos.getDOMNode().value !== '';
   },
   showAdvanced: function() {
     var adv = this.refs.adv.getDOMNode(),

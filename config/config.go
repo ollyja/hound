@@ -52,6 +52,15 @@ func (r *Repo) PushUpdatesEnabled() bool {
 	return optionToBool(r.EnablePushUpdates, defaultPushEnabled)
 }
 
+func (r *Repo) ToJsonString() string {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return ""
+	}
+
+	return string(b)
+}
+
 type Config struct {
 	DbPath                string           `json:"dbpath"`
 	Repos                 map[string]*Repo `json:"repos"`

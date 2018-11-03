@@ -11,6 +11,11 @@ var lib = {
     },
 
     UrlToRepo: function(repo, path, line, rev) {
+        if (typeof(repo) == 'undefined') {
+            // repo is not found, might be caused by hot-reloading, put url to be /
+            return '/';
+        }
+
         var url = repo.url.replace(/\.git$/, ''),
             pattern = repo['url-pattern'],
             filename = path.substring(path.lastIndexOf('/') + 1),

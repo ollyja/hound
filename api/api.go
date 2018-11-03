@@ -25,6 +25,10 @@ type Stats struct {
 	Duration    int
 }
 
+var (
+	gSearchers map[string]*searcher.Searcher 
+)
+
 func writeJson(w http.ResponseWriter, data interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -159,11 +163,22 @@ func parseRangeValue(rv string) (int, int) {
 	return b, e
 }
 
+func SetSearchers(searchers map[string]*searcher.Searcher) {
+	gSearchers = searchers
+}
+
+func GetSearchers() map[string]*searcher.Searcher {
+	return gSearchers
+}
+
 func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
+
+	// record it as global searchers when setup. it will be updated during hot-reloading 
+	gSearchers = idx
 
 	m.HandleFunc("/api/v1/repos", func(w http.ResponseWriter, r *http.Request) {
 		res := map[string]*config.Repo{}
-		for name, srch := range idx {
+		for name, srch := range gSearchers {
 			res[name] = srch.Repo
 		}
 
@@ -174,7 +189,7 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 		var opt index.SearchOptions
 
 		stats := parseAsBool(r.FormValue("stats"))
-		repos := parseAsRepoList(r.FormValue("repos"), idx)
+		repos := parseAsRepoList(r.FormValue("repos"), gSearchers)
 		query := r.FormValue("q")
 		opt.Offset, opt.Limit = parseRangeValue(r.FormValue("rng"))
 		opt.FileRegexp = r.FormValue("files")
@@ -188,7 +203,7 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 		var filesOpened int
 		var durationMs int
 
-		results, err := searchAll(query, &opt, repos, idx, &filesOpened, &durationMs)
+		results, err := searchAll(query, &opt, repos, gSearchers, &filesOpened, &durationMs)
 		if err != nil {
 			// TODO(knorton): Return ok status because the UI expects it for now.
 			writeError(w, err, http.StatusOK)
@@ -213,7 +228,7 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 
 	m.HandleFunc("/api/v1/excludes", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.FormValue("repo")
-		res := idx[repo].GetExcludedFiles()
+		res := gSearchers[repo].GetExcludedFiles()
 		w.Header().Set("Content-Type", "application/json;charset=utf-8")
 		w.Header().Set("Access-Control-Allow", "*")
 		fmt.Fprint(w, res)
@@ -227,10 +242,10 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 			return
 		}
 
-		repos := parseAsRepoList(r.FormValue("repos"), idx)
+		repos := parseAsRepoList(r.FormValue("repos"), gSearchers)
 
 		for _, repo := range repos {
-			searcher := idx[repo]
+			searcher := gSearchers[repo]
 			if searcher == nil {
 				writeError(w,
 					fmt.Errorf("No such repository: %s", repo),

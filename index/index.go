@@ -351,6 +351,12 @@ func indexAllFiles(opt *IndexOptions, dst, src string) error {
 	defer fileHandle.Close()
 
 	if err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		// path or info could be nil when file is from local but with invalid name 
+		p := &path
+		if (p == nil || info == nil) {
+			return nil
+		}
+
 		name := info.Name()
 		rel, err := filepath.Rel(src, path)
 		if err != nil {

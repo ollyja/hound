@@ -286,6 +286,37 @@ func MakeAll(cfg *config.Config) (map[string]*Searcher, map[string]error, error)
 	return searchers, errs, nil
 }
 
+// this will just make seachers based on config without unclaim existing one 
+func Make(cfg *config.Config) (map[string]*Searcher, map[string]error, error) {
+	errs := map[string]error{}
+	searchers := map[string]*Searcher{}
+
+	refs, err := findExistingRefs(cfg.DbPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	lim := makeLimiter(cfg.MaxConcurrentIndexers)
+
+	for name, repo := range cfg.Repos {
+		s, err := newSearcher(cfg.DbPath, name, repo, refs, lim)
+		if err != nil {
+			log.Print(err)
+			errs[name] = err
+			continue
+		}
+
+		searchers[name] = s
+	}
+
+	// after all the repos are in good shape, we start their polling
+	for _, s := range searchers {
+		s.begin()
+	}
+
+	return searchers, errs, nil
+}
+
 // Creates a new Searcher that is available for searches as soon as this returns.
 // This will pull or clone the target repo and start watching the repo for changes.
 func New(dbpath, name string, repo *config.Repo) (*Searcher, error) {
