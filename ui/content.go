@@ -46,7 +46,6 @@ func init() {
 		"/": &content{
 			template: "index.tpl.html",
 			sources: []string{
-				"js/common.js",
 				"js/hound.js",
 			},
 			tplType: "html",
@@ -60,7 +59,6 @@ func init() {
 		"/excluded_files.html": &content{
 			template: "excluded_files.tpl.html",
 			sources: []string{
-				"js/common.js",
 				"js/excluded_files.js",
 			},
 			tplType: "html",
