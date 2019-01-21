@@ -15,7 +15,7 @@ Hound is an extremely fast source code search engine. The core is based on this 
 1. Use the Go tools to install Hound. The binaries `houndd` (server) and `hound` (cli) will be installed in your $GOPATH.
 
 ```
-go get github.com/etsy/hound/cmds/...
+go get github.com/ollyja/hound/cmds/...
 ```
 
 2. Create a [config.json](config-example.json) in a directory with your list of repositories.
@@ -100,10 +100,9 @@ Currently the following editors have plugins that support Hound:
 Hound includes tools to make building locally easy. It is recommended that you use these tools if you are working on Hound. To get setup and build, just run the following commands:
 
 ```
-git clone https://github.com/ollyja/hound.git hound/src/github.com/etsy/hound
-cd hound
-(cd src/github.com/etsy/hound/ui && npm install)
-src/github.com/etsy/hound/tools/setup
+export GOPATH=`pwd`/hound
+git clone https://github.com/ollyja/hound.git $GOPATH/src/github.com/etsy/hound
+cd $GOPATH/src/github.com/etsy/hound
 make
 ```
 
