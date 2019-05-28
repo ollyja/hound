@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sort"
 
 	"github.com/etsy/hound/config"
 	"github.com/etsy/hound/index"
@@ -18,6 +19,7 @@ import (
 const (
 	defaultLinesOfContext uint = 2
 	maxLinesOfContext     uint = 20
+	defaultFilesOpened    int = 5
 )
 
 type Stats struct {
@@ -61,35 +63,61 @@ func searchAll(
 	query string,
 	opts *index.SearchOptions,
 	repos []string,
+	vrepos []string,
 	idx map[string]*searcher.Searcher,
 	filesOpened *int,
 	duration *int) (map[string]*index.SearchResponse, error) {
 
 	startedAt := time.Now()
 
+	// n: number of repos, an: number of active repo 
 	n := len(repos)
+	an := 0 
 
 	// use a buffered channel to avoid routine leaks on errs.
 	ch := make(chan *searchResponse, n)
 	for _, repo := range repos {
-		go func(repo string) {
-			fms, err := idx[repo].Search(query, opts)
+		// if repo is not part of searchers, ignore 
+		if idx[repo] == nil {
+			continue
+		}
+
+		an++;
+		go func(repo string, vrepos []string) {
+			fms, err := idx[repo].Search(query, opts, vrepos)
 			ch <- &searchResponse{repo, fms, err}
-		}(repo)
+		}(repo, vrepos)
 	}
 
 	res := map[string]*index.SearchResponse{}
-	for i := 0; i < n; i++ {
+	for i := 0; i < an; i++ {
 		r := <-ch
 		if r.err != nil {
 			return nil, r.err
 		}
 
-		if r.res.Matches == nil {
+		if r.res.Matches == nil && r.res.VMatches == nil {
 			continue
 		}
 
-		res[r.repo] = r.res
+		// check if it's hidden repo
+		if len(r.res.VMatches) > 0 {
+			for filerepo, vresult := range r.res.VMatches {
+				res[filerepo] = &index.SearchResponse{
+					Matches: 	vresult,
+					FilesWithMatch:	r.res.VFilesWithMatch[filerepo],
+ 					Revision:	r.res.VRevision[filerepo],
+				}
+			}
+		} else if r.res.Matches != nil {
+			res[r.repo] = r.res
+		}
+
+		// unset the keys 
+		r.res.VMatches = nil
+		r.res.VFilesWithMatch = nil
+		r.res.VRevision = nil
+
 		*filesOpened += r.res.FilesOpened
 	}
 
@@ -104,23 +132,41 @@ func parseAsBool(v string) bool {
 	return v == "true" || v == "1" || v == "fosho"
 }
 
-func parseAsRepoList(v string, idx map[string]*searcher.Searcher) []string {
+func parseAsRepoList(v string, idx map[string]*searcher.Searcher) ([]string,  []string) {
 	v = strings.TrimSpace(v)
 	var repos []string
-	if v == "*" {
+	var vrepos []string
+	if v == "*" || v == "" {
 		for repo := range idx {
 			repos = append(repos, repo)
 		}
-		return repos
+		return repos, vrepos
 	}
 
+	// if the repo doesn't exists in idx list, we enable all hidden repos
+	useHiddenRepos := false 
 	for _, repo := range strings.Split(v, ",") {
 		if idx[repo] == nil {
-			continue
+			useHiddenRepos = true
+			// stiall add it into vrepos list for later 
+			vrepos = append(vrepos, repo)
+			continue 
 		}
 		repos = append(repos, repo)
 	}
-	return repos
+
+	// add hidden repo for search 
+	if useHiddenRepos == true {
+		for repo, searcher := range idx {
+			if searcher.IsHidden() == true {
+				repos = append(repos, repo)
+			}
+		}
+	}
+
+	// sort here as we need to use sortSearch 
+	sort.Strings(vrepos)
+	return repos, vrepos
 }
 
 func parseAsUintValue(sv string, min, max, def uint) uint {
@@ -164,6 +210,7 @@ func parseRangeValue(rv string) (int, int) {
 }
 
 func SetSearchers(searchers map[string]*searcher.Searcher) {
+	// record it as global searchers when setup. it will be updated during hot-reloading 
 	gSearchers = searchers
 }
 
@@ -171,25 +218,49 @@ func GetSearchers() map[string]*searcher.Searcher {
 	return gSearchers
 }
 
-func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
+func checkReady(w http.ResponseWriter) bool {
+	if gSearchers == nil || len(gSearchers) <= 0 {
+		writeError(w, errors.New("Server is not ready, please wait..."), http.StatusOK)
+		return false
+	}
 
-	// record it as global searchers when setup. it will be updated during hot-reloading 
-	gSearchers = idx
+	return true 
+}
+
+func Setup(m *http.ServeMux) {
 
 	m.HandleFunc("/api/v1/repos", func(w http.ResponseWriter, r *http.Request) {
+		if checkReady(w) == false {
+			return
+		}
+
 		res := map[string]*config.Repo{}
-		for name, srch := range gSearchers {
-			res[name] = srch.Repo
+		for name, searcher := range gSearchers {
+			if searcher.IsHidden() == true {
+				vrepos := searcher.GetVRepos()
+				for _, v := range vrepos {
+					res[v] = &config.Repo {
+						UrlPattern: searcher.Repo.UrlPattern,
+						Revision: searcher.GetVRepoRev(v),
+					}
+				}
+			} else {
+				res[name] = searcher.Repo
+			}
 		}
 
 		writeResp(w, res)
 	})
 
 	m.HandleFunc("/api/v1/search", func(w http.ResponseWriter, r *http.Request) {
+		if checkReady(w) == false {
+			return
+		}
+
 		var opt index.SearchOptions
 
 		stats := parseAsBool(r.FormValue("stats"))
-		repos := parseAsRepoList(r.FormValue("repos"), gSearchers)
+		repos, vrepos := parseAsRepoList(r.FormValue("repos"), gSearchers)
 		query := r.FormValue("q")
 		opt.Offset, opt.Limit = parseRangeValue(r.FormValue("rng"))
 		opt.FileRegexp = r.FormValue("files")
@@ -200,10 +271,21 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 			maxLinesOfContext,
 			defaultLinesOfContext)
 
+		// opt.Limit must not be too large if repo is more than one 
+		if len(repos) > 1 {
+			opt.Limit = defaultFilesOpened
+		}
+
+		query = strings.TrimSpace(query)
+		if len(query) <= 0 {
+			writeError(w, errors.New("No query"), http.StatusOK)
+			return
+		}
+
 		var filesOpened int
 		var durationMs int
 
-		results, err := searchAll(query, &opt, repos, gSearchers, &filesOpened, &durationMs)
+		results, err := searchAll(query, &opt, repos, vrepos, gSearchers, &filesOpened, &durationMs)
 		if err != nil {
 			// TODO(knorton): Return ok status because the UI expects it for now.
 			writeError(w, err, http.StatusOK)
@@ -227,14 +309,38 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 	})
 
 	m.HandleFunc("/api/v1/excludes", func(w http.ResponseWriter, r *http.Request) {
+		if checkReady(w) == false {
+			return
+		}
+
 		repo := r.FormValue("repo")
-		res := gSearchers[repo].GetExcludedFiles()
+		res := "[]"
+
+		if gSearchers[repo] == nil {
+			for _, searcher := range gSearchers {
+				if searcher.IsHidden() == true {
+					vrepos := searcher.GetVRepos()
+					i := sort.SearchStrings(vrepos, repo)
+					if i < len(vrepos) && vrepos[i] == repo {
+						res = searcher.GetExcludedFiles(repo)
+						break
+					}
+				}
+			}
+		} else {
+			res = gSearchers[repo].GetExcludedFiles("")
+		}
+
 		w.Header().Set("Content-Type", "application/json;charset=utf-8")
 		w.Header().Set("Access-Control-Allow", "*")
 		fmt.Fprint(w, res)
 	})
 
 	m.HandleFunc("/api/v1/update", func(w http.ResponseWriter, r *http.Request) {
+		if checkReady(w) == false {
+			return
+		}
+
 		if r.Method != "POST" {
 			writeError(w,
 				errors.New(http.StatusText(http.StatusMethodNotAllowed)),
@@ -242,7 +348,7 @@ func Setup(m *http.ServeMux, idx map[string]*searcher.Searcher) {
 			return
 		}
 
-		repos := parseAsRepoList(r.FormValue("repos"), gSearchers)
+		repos, _ := parseAsRepoList(r.FormValue("repos"), gSearchers)
 
 		for _, repo := range repos {
 			searcher := gSearchers[repo]

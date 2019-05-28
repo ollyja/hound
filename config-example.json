@@ -66,6 +66,11 @@
         "LocalDirectory" : {
             "url" : "file:///absolute/path/to/directory",
             "vcs" : "local"
+        },
+        "LargeLocalDirectory" : {
+            "url" : "file:///absolute/path/to/org/repo/branch/directories",
+            "vcs" : "local",
+            "hidden" : true
         }
 
     }

@@ -5,7 +5,7 @@ export function ExpandVars(template, values) {
     return template;
 };
 
-export function UrlToRepo(repo, path, line, rev) {
+export function UrlToRepo(reponame, repo, path, line, rev) {
     if (typeof(repo) == 'undefined') {
         // repo is not found, might be caused by hot-reloading, put url to be /
         return '/';
@@ -41,6 +41,7 @@ export function UrlToRepo(repo, path, line, rev) {
         url : url,
         path: path,
         rev: rev,
-        anchor: anchor
+        anchor: anchor,
+        reponame: reponame
     });
 }

@@ -1,4 +1,6 @@
 // Copyright 2011 The Go Authors.  All rights reserved.
+// Copyright 2013-2016 Manpreet Singh ( junkblocker@yahoo.com ). All rights reserved.
+//
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -355,9 +357,15 @@ type Grep struct {
 	Stderr io.Writer // error target
 
 	L bool // L flag - print file names only
+	Z bool // 0 flag - print matches separated by \0
 	C bool // C flag - print count of matches
 	N bool // N flag - print line numbers
 	H bool // H flag - do not print file names
+
+	Done                 bool
+	lines_printed        int64 // running match count
+	max_print_lines      int64 // Max match count
+	maxPrintLinesPerFile int64 // Max match count
 
 	Match bool
 
@@ -366,6 +374,7 @@ type Grep struct {
 
 func (g *Grep) AddFlags() {
 	flag.BoolVar(&g.L, "l", false, "list matching files only")
+	flag.BoolVar(&g.Z, "0", false, "list filename matches separated by NUL ('\\0') character. Requires -l option")
 	flag.BoolVar(&g.C, "c", false, "print match counts only")
 	flag.BoolVar(&g.N, "n", false, "show line numbers")
 	flag.BoolVar(&g.H, "h", false, "omit file names")
@@ -379,6 +388,19 @@ func (g *Grep) File(name string) {
 	}
 	defer f.Close()
 	g.Reader(f, name)
+}
+
+func (g *Grep) LimitPrintCount(globalLimit int64, fileLimit int64) {
+	g.Done = false
+	g.lines_printed = 0
+	g.max_print_lines = globalLimit
+	if g.max_print_lines < 0 {
+		g.max_print_lines = 0
+	}
+	g.maxPrintLinesPerFile = fileLimit
+	if g.maxPrintLinesPerFile < 0 {
+		g.maxPrintLinesPerFile = 0
+	}
 }
 
 var nl = []byte{'\n'}
@@ -397,27 +419,38 @@ func countNL(b []byte) int {
 }
 
 func (g *Grep) Reader(r io.Reader, name string) {
+	if g.Done {
+		return
+	}
 	if g.buf == nil {
 		g.buf = make([]byte, 1<<20)
 	}
 	var (
-		buf        = g.buf[:0]
-		needLineno = g.N
-		lineno     = 1
-		count      = 0
-		prefix     = ""
-		beginText  = true
-		endText    = false
+		buf                  = g.buf[:0]
+		needLineno           = g.N
+		lineno               = 1
+		count                = 0
+		prefix               = ""
+		beginText            = true
+		endText              = false
+		outSep               = '\n'
+		printedForFile int64 = 0
 	)
 	if !g.H {
 		prefix = name + ":"
+	}
+	if g.L && g.Z {
+		outSep = '\x00'
 	}
 	for {
 		n, err := io.ReadFull(r, buf[len(buf):cap(buf)])
 		buf = buf[:len(buf)+n]
 		end := len(buf)
 		if err == nil {
-			end = bytes.LastIndex(buf, nl) + 1
+			i := bytes.LastIndex(buf, nl)
+			if i >= 0 {
+				end = i + 1
+			}
 		} else {
 			endText = true
 		}
@@ -430,7 +463,11 @@ func (g *Grep) Reader(r io.Reader, name string) {
 			}
 			g.Match = true
 			if g.L {
-				fmt.Fprintf(g.Stdout, "%s\n", name)
+				fmt.Fprintf(g.Stdout, "%s%c", name, outSep)
+				g.lines_printed++
+				if g.max_print_lines > 0 && g.lines_printed >= g.max_print_lines {
+					g.Done = true
+				}
 				return
 			}
 			lineStart := bytes.LastIndex(buf[chunkStart:m1], nl) + 1 + chunkStart
@@ -442,13 +479,35 @@ func (g *Grep) Reader(r io.Reader, name string) {
 				lineno += countNL(buf[chunkStart:lineStart])
 			}
 			line := buf[lineStart:lineEnd]
+			nl := ""
+			if len(line) == 0 || line[len(line)-1] != '\n' {
+				nl = "\n"
+			}
 			switch {
 			case g.C:
 				count++
 			case g.N:
-				fmt.Fprintf(g.Stdout, "%s%d:%s", prefix, lineno, line)
+				fmt.Fprintf(g.Stdout, "%s%d:%s%s", prefix, lineno, line, nl)
+				g.lines_printed++
+				printedForFile++
+				if g.max_print_lines > 0 && g.lines_printed >= g.max_print_lines {
+					g.Done = true
+					return
+				}
+				if g.maxPrintLinesPerFile > 0 && printedForFile >= g.maxPrintLinesPerFile {
+					return
+				}
 			default:
-				fmt.Fprintf(g.Stdout, "%s%s", prefix, line)
+				fmt.Fprintf(g.Stdout, "%s%s%s", prefix, line, nl)
+				g.lines_printed++
+				printedForFile++
+				if g.max_print_lines > 0 && g.lines_printed >= g.max_print_lines {
+					g.Done = true
+					return
+				}
+				if g.maxPrintLinesPerFile > 0 && printedForFile >= g.maxPrintLinesPerFile {
+					return
+				}
 			}
 			if needLineno {
 				lineno++
@@ -463,11 +522,17 @@ func (g *Grep) Reader(r io.Reader, name string) {
 		if len(buf) == 0 && err != nil {
 			if err != io.EOF && err != io.ErrUnexpectedEOF {
 				fmt.Fprintf(g.Stderr, "%s: %v\n", name, err)
+				// error lines do not count towards max lines printed
 			}
 			break
 		}
 	}
 	if g.C && count > 0 {
 		fmt.Fprintf(g.Stdout, "%s: %d\n", name, count)
+		g.lines_printed++
+		if g.max_print_lines > 0 && g.lines_printed >= g.max_print_lines {
+			g.Done = true
+			return
+		}
 	}
 }

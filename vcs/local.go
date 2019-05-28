@@ -2,7 +2,9 @@ package vcs
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"path/filepath"
 
 	"github.com/etsy/hound/config"
 )
@@ -22,7 +24,19 @@ func (g *LocalDriver) WorkingDirForRepo(dbpath string, repo *config.Repo) (strin
 }
 
 func (g *LocalDriver) HeadRev(dir string) (string, error) {
-	return "n/a", nil
+	realdir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		fmt.Printf("Failed to read symlink ", dir)
+		return "", err
+	}
+
+	stat, err := os.Stat(realdir)
+	if err != nil {
+		fmt.Println("failed to determine modification time of ", realdir)
+		return "", err
+	}
+
+	return stat.ModTime().String(), nil
 }
 
 func (g *LocalDriver) Pull(dir string) (string, error) {

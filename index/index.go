@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+	"strings"
+	"sort"
 
 	"github.com/etsy/hound/codesearch/index"
 	"github.com/etsy/hound/codesearch/regexp"
@@ -33,6 +35,8 @@ type Index struct {
 	Ref *IndexRef
 	idx *index.Index
 	lck sync.RWMutex
+	Hidden bool
+	FileRepo string
 }
 
 type IndexOptions struct {
@@ -56,11 +60,14 @@ type Match struct {
 }
 
 type SearchResponse struct {
-	Matches        []*FileMatch
-	FilesWithMatch int
-	FilesOpened    int           `json:"-"`
-	Duration       time.Duration `json:"-"`
-	Revision       string
+	Matches          []*FileMatch
+	VMatches         map[string][]*FileMatch
+	FilesWithMatch   int
+	VFilesWithMatch  map[string]int
+	FilesOpened      int           `json:"-"`
+	Duration         time.Duration `json:"-"`
+	Revision         string
+	VRevision        map[string]string
 }
 
 type FileMatch struct {
@@ -124,6 +131,10 @@ func (n *Index) GetDir() string {
 	return n.Ref.dir
 }
 
+func (n *Index) GetFile() string {
+	return filepath.Join(n.Ref.dir, "tri")
+}
+
 func toStrings(lines [][]byte) []string {
 	strs := make([]string, len(lines))
 	for i, n := 0, len(lines); i < n; i++ {
@@ -139,7 +150,7 @@ func GetRegexpPattern(pat string, ignoreCase bool) string {
 	return "(?m)" + pat
 }
 
-func (n *Index) Search(pat string, opt *SearchOptions) (*SearchResponse, error) {
+func (n *Index) Search(pat string, opt *SearchOptions, vrepos []string) (*SearchResponse, error) {
 	startedAt := time.Now()
 
 	n.lck.RLock()
@@ -159,6 +170,12 @@ func (n *Index) Search(pat string, opt *SearchOptions) (*SearchResponse, error) 
 		matchesCollected int
 	)
 
+	// a list of map per filerepo
+	vfilesCollected := map[string]int{}
+	vresults        := map[string][]*FileMatch{}
+	vfilesFound     := map[string]int{}
+	vrevision       := map[string]string{}
+
 	var fre *regexp.Regexp
 	if opt.FileRegexp != "" {
 		fre, err = regexp.Compile(opt.FileRegexp)
@@ -169,61 +186,123 @@ func (n *Index) Search(pat string, opt *SearchOptions) (*SearchResponse, error) 
 
 	files := n.idx.PostingQuery(index.RegexpQuery(re.Syntax))
 	for _, file := range files {
-		var matches []*Match
+		var (
+			matches []*Match
+			filerepo string
+			repobranch string
+		)
+
 		name := n.idx.Name(file)
 		hasMatch := false
+		showname := name
 
 		// reject files that do not match the file pattern
 		if fre != nil && fre.MatchString(name, true, true) < 0 {
 			continue
 		}
 
-		filesOpened++
-		if err := g.grep2File(filepath.Join(n.Ref.dir, "raw", name), re, int(opt.LinesOfContext),
-			func(line []byte, lineno int, before [][]byte, after [][]byte) (bool, error) {
+		/// for vrepos, it has org/repo format
+		if n.Hidden == true {
+			// name has: repo/branch/filename
+			names := strings.Split(name, string(os.PathSeparator))
 
-				hasMatch = true
-				if filesFound < opt.Offset || (opt.Limit > 0 && filesCollected >= opt.Limit) {
-					return false, nil
+			// need to use name org/repo to filerepo
+			rnames := []string{n.FileRepo, names[0]}
+			filerepo = strings.Join(rnames[:], "/")
+
+			// showname will be just filename after branch 
+			showname = filepath.Join(names[2:]...)
+			repobranch = names[1]
+
+			if len(vrepos) > 0 {
+				// we can sort search as vrepos is already sorted 
+				i := sort.SearchStrings(vrepos, filerepo)
+				if i >= len(vrepos) || vrepos[i] != filerepo {
+					continue 
 				}
+			}
 
-				matchesCollected++
-				matches = append(matches, &Match{
-					Line:       string(line),
-					LineNumber: lineno,
-					Before:     toStrings(before),
-					After:      toStrings(after),
-				})
-
-				if matchesCollected > matchLimit {
-					return false, fmt.Errorf("search exceeds limit on matches: %d", matchLimit)
-				}
-
-				return true, nil
-			}); err != nil {
-			return nil, err
+			// use this per repo file stats 
+			filesCollected = vfilesCollected[filerepo]
+			filesFound = vfilesFound[filerepo]
 		}
+
+		if opt.Limit == 0 || (opt.Limit > 0 && filesCollected < opt.Limit) {
+
+			filesOpened++
+
+			if err := g.grep2File(filepath.Join(n.Ref.dir, "raw", name), re, int(opt.LinesOfContext),
+				func(line []byte, lineno int, before [][]byte, after [][]byte) (bool, error) {
+
+					hasMatch = true
+					if filesFound < opt.Offset {
+						return false, nil
+					}
+
+					matchesCollected++
+					matches = append(matches, &Match{
+						Line:       string(line),
+						LineNumber: lineno,
+						Before:     toStrings(before),
+						After:      toStrings(after),
+					})
+
+					if matchesCollected > matchLimit {
+						return false, fmt.Errorf("search exceeds limit on matches: %d", matchLimit)
+					}
+
+					return true, nil
+				}); err != nil {
+					return nil, err
+				}
+		} else {
+			// count all possible matches after stopping grep2File (which opens file)
+			filesFound++
+			if len(filerepo) > 0 {
+				vfilesFound[filerepo]++
+			}
+
+			continue
+		}
+
 
 		if !hasMatch {
 			continue
 		}
 
 		filesFound++
+		if len(filerepo) > 0 {
+			vfilesFound[filerepo]++
+		}
+
 		if len(matches) > 0 {
-			filesCollected++
-			results = append(results, &FileMatch{
-				Filename: name,
-				Matches:  matches,
-			})
+
+			if len(filerepo) > 0 {
+				vfilesCollected[filerepo]++
+				vrevision[filerepo] = repobranch
+				vresults[filerepo] = append(vresults[filerepo], &FileMatch{
+					Filename: showname,
+					Matches: matches,
+				})
+			} else {
+				filesCollected++
+				results = append(results, &FileMatch{
+					Filename: showname,
+					Matches:  matches,
+				})
+			}
 		}
 	}
 
 	return &SearchResponse{
-		Matches:        results,
-		FilesWithMatch: filesFound,
-		FilesOpened:    filesOpened,
-		Duration:       time.Now().Sub(startedAt),
-		Revision:       n.Ref.Rev,
+		Matches:         results,
+		VMatches:        vresults,
+		FilesWithMatch:  filesFound,
+		VFilesWithMatch: vfilesFound,
+		FilesOpened:     filesOpened,
+		Duration:        time.Now().Sub(startedAt),
+		Revision:        n.Ref.Rev,
+		VRevision:       vrevision,
 	}, nil
 }
 
@@ -284,6 +363,12 @@ func addFileToIndex(ix *index.IndexWriter, dst, src, path string) (string, error
 		return "", err
 	}
 
+	// open the file path to check size 
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+
 	r, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -300,7 +385,8 @@ func addFileToIndex(ix *index.IndexWriter, dst, src, path string) (string, error
 	g := gzip.NewWriter(w)
 	defer g.Close()
 
-	return ix.Add(rel, io.TeeReader(r, g)), nil
+	ix.Add(rel, io.TeeReader(r, g), fi.Size())
+    return "", nil
 }
 
 func addDirToIndex(dst, src, path string) error {
@@ -337,7 +423,7 @@ func containsString(haystack []string, needle string) bool {
 	return false
 }
 
-func indexAllFiles(opt *IndexOptions, dst, src string) error {
+func indexAllFiles(opt *IndexOptions, dst, path string) error {
 	ix := index.Create(filepath.Join(dst, "tri"))
 	defer ix.Close()
 
@@ -349,6 +435,14 @@ func indexAllFiles(opt *IndexOptions, dst, src string) error {
 		return err
 	}
 	defer fileHandle.Close()
+
+	src, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+
+	// use top level path to indexed path (it's not required) 
+	ix.AddPaths([]string{filepath.Join(filepath.Base(filepath.Dir(dst)), filepath.Base(dst), "raw")})
 
 	if err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		// path or info could be nil when file is from local but with invalid name 

@@ -30,18 +30,21 @@ var (
 	startTime = time.Now()
 )
 
-func makeAllSearchers(cfg *config.Config) (map[string]*searcher.Searcher, bool, error) {
+func makeAllSearchers(cfg *config.Config) (bool, error) {
 	// Ensure we have a dbpath
 	if _, err := os.Stat(cfg.DbPath); err != nil {
 		if err := os.MkdirAll(cfg.DbPath, os.ModePerm); err != nil {
-			return nil, false, err
+			return false, err
 		}
 	}
 
 	searchers, errs, err := searcher.MakeAll(cfg)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
+
+	// set searcher list 
+	api.SetSearchers(searchers)
 
 	if len(errs) > 0 {
 		// NOTE: This mutates the original config so the repos
@@ -50,10 +53,10 @@ func makeAllSearchers(cfg *config.Config) (map[string]*searcher.Searcher, bool, 
 			delete(cfg.Repos, name)
 		}
 
-		return searchers, false, nil
+		return false, nil
 	}
 
-	return searchers, true, nil
+	return true, nil
 }
 
 func makeSearchers(cfg *config.Config) (map[string]*searcher.Searcher, bool, error) {
@@ -77,19 +80,17 @@ func makeSearchers(cfg *config.Config) (map[string]*searcher.Searcher, bool, err
 }
 
 func handleShutdown(shutdownCh <-chan os.Signal) {
-	go func() {
-		<-shutdownCh
-		info_log.Printf("Graceful shutdown requested...")
-		for _, s := range api.GetSearchers() {
-			s.Stop()
-		}
+	<-shutdownCh
+	info_log.Printf("Graceful shutdown requested...")
+	for _, s := range api.GetSearchers() {
+		s.Stop()
+	}
 
-		for _, s := range api.GetSearchers() {
-			s.Wait()
-		}
+	for _, s := range api.GetSearchers() {
+		s.Wait()
+	}
 
-		os.Exit(0)
-	}()
+	os.Exit(0)
 }
 
 func registerShutdownSignal() <-chan os.Signal {
@@ -118,11 +119,10 @@ func makeTemplateData(cfg *config.Config) (interface{}, error) {
 }
 
 func runHttp(
+	m *http.ServeMux,
 	addr string,
 	dev bool,
-	cfg *config.Config,
-	idx map[string]*searcher.Searcher) error {
-	m := http.DefaultServeMux
+	cfg *config.Config) error {
 
 	h, err := ui.Content(dev, cfg)
 	if err != nil {
@@ -130,7 +130,7 @@ func runHttp(
 	}
 
 	m.Handle("/", h)
-	api.Setup(m, idx)
+	api.Setup(m)
 	return http.ListenAndServe(addr, m)
 }
 
@@ -139,6 +139,10 @@ func scanChanges(
 	allFiles bool, cb scanCallback) {
 	for {
 		filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+
 			if path == ".git" && info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -174,21 +178,26 @@ func checkConfigChange(
 		scanChanges(filename, true, func(path string) {
 			var cfgn config.Config
 			if err := cfgn.LoadFromFile(path); err != nil {
-				panic(err)
-				os.Exit(0)
+				// ignore the error as we might in the middle of the changing 
+				return 
 			}
 
 			deleted := map[string]string{}
 			// remove not changed repo 
 			for name, repo := range cfg.Repos {
 				repo1, ok := cfgn.Repos[name]
+
+				// filter out ms-between-poll as it the value can be dynamic 
+				repo1.MsBetweenPolls = repo.MsBetweenPolls
+				// can have anything else which we use to trigger hot reload 
+
 				if ok && repo.ToJsonString() == repo1.ToJsonString() {
 					info_log.Println("no change for: ", name)
 					// no change 
 					delete(cfgn.Repos, name)
 				} else if ok {
-				info_log.Println("config json: ",  repo.ToJsonString())
-				info_log.Println("config json: ",  repo1.ToJsonString())
+					info_log.Println("config json: ",  repo.ToJsonString())
+					info_log.Println("config json: ",  repo1.ToJsonString())
 					// the config is udpated, need to restart 
 					info_log.Println("config is altered, will restart: ", name)
 					deleted[name] = name
@@ -264,10 +273,27 @@ func main() {
 		panic(err)
 	}
 
+	// start server first 
+	host := *flagAddr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+
+	info_log.Printf("running server at http://%s...\n", host)
+
+	// create http default handler to start server in different thread
+	m := http.DefaultServeMux
+
+	go func() {
+		if err := runHttp(m, *flagAddr, *flagDev, &cfg); err != nil {
+			panic(err)
+		}
+	}()
+
 	// It's not safe to be killed during makeAllSearchers, so register the
 	// shutdown signal here and defer processing it until we are ready.
 	shutdownCh := registerShutdownSignal()
-	idx, ok, err := makeAllSearchers(&cfg)
+	ok, err := makeAllSearchers(&cfg)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -282,15 +308,4 @@ func main() {
 
 	// handle graceful shutdown 
 	handleShutdown(shutdownCh)
-
-	host := *flagAddr
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-
-	info_log.Printf("running server at http://%s...\n", host)
-
-	if err := runHttp(*flagAddr, *flagDev, &cfg, idx); err != nil {
-		panic(err)
-	}
 }

@@ -31,6 +31,8 @@ type Repo struct {
 	ExcludeDotFiles   bool           `json:"exclude-dot-files"`
 	EnablePollUpdates *bool          `json:"enable-poll-updates"`
 	EnablePushUpdates *bool          `json:"enable-push-updates"`
+	Hidden            bool           `json:"hidden"`
+	Revision          string         `json:"-"` // use - to ignore from json.Marshal
 }
 
 // Used for interpreting the config value for fields that use *bool. If a value
@@ -50,6 +52,11 @@ func (r *Repo) PollUpdatesEnabled() bool {
 // Are push based updates enabled on this repo?
 func (r *Repo) PushUpdatesEnabled() bool {
 	return optionToBool(r.EnablePushUpdates, defaultPushEnabled)
+}
+
+// Is Repo hidden 
+func (r *Repo) IsHidden() bool {
+	return optionToBool(&r.Hidden, false)
 }
 
 func (r *Repo) ToJsonString() string {

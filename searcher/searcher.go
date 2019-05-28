@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"strings"
+	"encoding/json"
 
 	"github.com/etsy/hound/config"
 	"github.com/etsy/hound/index"
@@ -20,6 +22,7 @@ type Searcher struct {
 	idx  *index.Index
 	lck  sync.RWMutex
 	Repo *config.Repo
+	vrepos map[string]string
 
 	// The channel is used to request updates from the API and
 	// to signal that it is ok for searchers to begin polling.
@@ -119,25 +122,50 @@ func (s *Searcher) swapIndexes(idx *index.Index) error {
 // and the options.
 //
 // TODO(knorton): pat should really just be a part of SearchOptions
-func (s *Searcher) Search(pat string, opt *index.SearchOptions) (*index.SearchResponse, error) {
+func (s *Searcher) Search(pat string, opt *index.SearchOptions, vrepos []string) (*index.SearchResponse, error) {
 	s.lck.RLock()
 	defer s.lck.RUnlock()
-	return s.idx.Search(pat, opt)
+	return s.idx.Search(pat, opt, vrepos)
 }
 
 // Get the excluded files as a JSON string. This is only used for returning
 // the data directly to clients (thus JSON).
-func (s *Searcher) GetExcludedFiles() string {
+func (s *Searcher) GetExcludedFiles(repo string) string {
 	path := filepath.Join(s.idx.GetDir(), "excluded_files.json")
 	dat, err := ioutil.ReadFile(path)
 	if err != nil {
 		log.Printf("Couldn't read excluded_files.json %v\n", err)
 	}
+
+	if repo != "" {
+		// repo has org/repo format, we only need to take base name 
+		repo = filepath.Base(repo)
+		excluded := []*index.ExcludedFile{}
+		raw := []*index.ExcludedFile{}
+		json.Unmarshal(dat, &raw)
+		for _, d := range raw {
+			if strings.Index(d.Filename, repo) == 0 {
+				// name has repo/branch/filename
+				names := strings.Split(d.Filename, string(os.PathSeparator))
+				d.Filename = filepath.Join(names[2:]...)
+				excluded = append(excluded, d)
+			}
+		}
+
+		out, _ := json.Marshal(excluded)
+		return string(out)
+	}
+
 	return string(dat)
 }
 
 // Triggers an immediate poll of the repository.
 func (s *Searcher) Update() bool {
+
+	if s.Repo == nil {
+		return true
+	}
+
 	if !s.Repo.PushUpdatesEnabled() {
 		return false
 	}
@@ -168,6 +196,26 @@ func (s *Searcher) Wait() {
 
 func (s *Searcher) completeShutdown() {
 	close(s.doneCh)
+}
+
+// Get searcher's virtual repos 
+func (s *Searcher) GetVRepos() []string {
+	var vrepos []string
+	for k, _ := range s.vrepos {
+		vrepos = append(vrepos, k)
+	}
+
+	return vrepos
+}
+
+// Get searcher's revision
+func (s *Searcher) GetVRepoRev(repo string) string {
+	return s.vrepos[repo]
+}
+
+// Get searcher's hidden attribute 
+func (s *Searcher) IsHidden() bool {
+	return s.Repo.IsHidden()
 }
 
 // Wait for either the delay period to expire or an update request to
@@ -349,6 +397,41 @@ func New(dbpath, name string, repo *config.Repo) (*Searcher, error) {
 	return s, nil
 }
 
+func setVRepos(s *Searcher, vcsDir string) bool {
+	repo := s.Repo
+	idx := s.idx
+
+	// do special for hidden repo
+	if repo.IsHidden() == true {
+		// set index hidden attribute 
+		idx.Hidden = repo.IsHidden()
+		idx.FileRepo = filepath.Base(vcsDir)
+
+		// empty vrepos first 
+		s.vrepos = make(map[string]string)
+
+		// get all sub directory as org/repo_branch reo for hidden repo 
+		dirs, err := filepath.Glob(filepath.Join(vcsDir, "*", "*"))
+		if err != nil {
+			return false
+		}
+
+		for _, dir := range dirs {
+			// convert dir to separated  folder list
+			// vcsDir/repo/branch
+			// create slice and append last two foldedrname (repo/branch)
+			// into org/repo slice
+			names := strings.Split(dir, string(os.PathSeparator))
+			rname := []string{filepath.Base(vcsDir), names[len(names)-2]}
+
+			s.vrepos[strings.Join(rname[:], "/")] = names[len(names)-1]
+		}
+	}
+
+	return true
+}
+
+
 // Update the vcs and reindex the given repo.
 func updateAndReindex(
 	s *Searcher,
@@ -388,6 +471,10 @@ func updateAndReindex(
 		log.Printf("failed index build (%s): %s", name, err)
 		return rev, false
 	}
+
+	// set revision and vrepos
+	repo.Revision = newRev
+	setVRepos(s, vcsDir)
 
 	if err := s.swapIndexes(idx); err != nil {
 		log.Printf("failed index swap (%s): %s", name, err)
@@ -457,6 +544,10 @@ func newSearcher(
 		doneCh:     make(chan empty),
 		shutdownCh: make(chan empty, 1),
 	}
+
+	// set revision and vrepos
+	repo.Revision = rev
+	setVRepos(s, vcsDir)
 
 	go func() {
 

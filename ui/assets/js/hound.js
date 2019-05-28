@@ -707,7 +707,7 @@ var FilesView = React.createClass({
 
     var more = '';
     if (matches.length < totalMatches) {
-      more = (<button className="moar" onClick={this.onLoadMore}>Load all {totalMatches} matches in {Model.NameForRepo(repo)}</button>);
+      more = (<button className="moar" onClick={this.onLoadMore}>Load all {totalMatches} possible matches in {Model.NameForRepo(repo)}</button>);
     }
 
     return (
@@ -768,6 +768,7 @@ var ResultView = React.createClass({
     var _this = this;
     Model.willSearch.tap(function(model, params) {
       _this.setState({
+        error: null,
         results: null,
         query: params.q
       });

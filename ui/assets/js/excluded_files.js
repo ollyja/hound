@@ -2,7 +2,7 @@ import {UrlToRepo} from './common';
 
 var ExcludedRow = React.createClass({
   render: function() {
-    var url = UrlToRepo(this.props.repo, this.props.file.Filename, this.props.rev);
+    var url = UrlToRepo(this.props.reponame, this.props.repo, this.props.file.Filename, null, this.props.repo.Revision);
     return (
       <tr>
         <td className="name">
@@ -23,7 +23,7 @@ var ExcludedTable = React.createClass({
 
     var rows = [];
     this.props.files.forEach(function(file) {
-      rows.push(<ExcludedRow file={file} repo={_this.props.repo} />);
+      rows.push(<ExcludedRow file={file} repo={_this.props.repo} reponame={_this.props.reponame}/>);
     });
 
     return (
@@ -100,6 +100,7 @@ var FilterableExcludedFiles = React.createClass({
     var _this = this;
     _this.setState({
       searching: true,
+      reponame: repo,
       repo: this.state.repos[repo],
     });
     $.ajax({
@@ -125,7 +126,7 @@ var FilterableExcludedFiles = React.createClass({
 
         <div id="excluded_files" className="table-container">
           <RepoList repos={Object.keys(this.state.repos)} onRepoClick={this.onRepoClick} repo={this.state.repo} />
-          <ExcludedTable files={this.state.files} searching={this.state.searching} repo={this.state.repo} />
+          <ExcludedTable files={this.state.files} searching={this.state.searching} repo={this.state.repo} reponame={this.state.reponame} />
         </div>
       </div>
     );
